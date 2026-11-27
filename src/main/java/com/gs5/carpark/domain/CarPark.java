@@ -1,25 +1,38 @@
 package com.gs5.carpark.domain;
 
-import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * Aggregate root: guarantees that a vehicle is parked at most once and that a space holds at
+ * most one vehicle. Every state change goes through a single lock.
+ */
 public final class CarPark {
 
-    private static final Duration EXTRA_FEE_INTERVAL = Duration.ofMinutes(5);
-    private static final long EXTRA_FEE_IN_PENCE = 100L;
+    private static final int CAPACITY = 2;
 
     private final ReentrantLock lock = new ReentrantLock();
-
     private final Map<RegistrationNumber, ParkingSession> activeSessions = new HashMap<>();
-    private final Queue<Space> availableSpaces = new ArrayDeque<>(List.of(new Space(1), new Space(2)));
+    private final ParkingSpaces spaces;
+    private final Tariff tariff;
 
+    public CarPark() {
+        this(new ParkingSpaces(CAPACITY), new Tariff());
+    }
+
+    CarPark(ParkingSpaces spaces, Tariff tariff) {
+        this.spaces = spaces;
+        this.tariff = tariff;
+    }
 
     public Occupancy occupancy() {
         lock.lock();
         try {
-            return new Occupancy(availableSpaces.size(), activeSessions.size());
+            return new Occupancy(spaces.freeCount(), activeSessions.size());
         } finally {
             lock.unlock();
         }
@@ -30,10 +43,10 @@ public final class CarPark {
         Objects.requireNonNull(startTime, "Start time must not be null");
         lock.lock();
         try {
-            if (isAlreadyParked(vehicle)) {
+            if (activeSessions.containsKey(vehicle.registrationNumber())) {
                 return Optional.empty();
             }
-            return allocateFreeSpace()
+            return spaces.allocate()
                     .map(space -> startSession(vehicle, space, startTime));
         } finally {
             lock.unlock();
@@ -44,67 +57,22 @@ public final class CarPark {
         Objects.requireNonNull(registrationNumber, "Registration number must not be null");
         Objects.requireNonNull(at, "Check-out time must not be null");
         final ParkingSession session;
-        final TimeofUsed timeOfUsed;
         lock.lock();
         try {
-            session = activeSessions.get(registrationNumber);
+            session = activeSessions.remove(registrationNumber);
             if (session == null) {
                 return Optional.empty();
             }
-            timeOfUsed = new TimeofUsed(session.startTime(), notBefore(session.startTime(), at));
-            activeSessions.remove(registrationNumber);
-            availableSpaces.add(session.space());
+            spaces.release(session.space());
         } finally {
             lock.unlock();
         }
-        return Optional.of(toBill(session.vehicle(), timeOfUsed));
-    }
-
-    /**
-     * The wall clock can step backwards between check-in and check-out (NTP correction, manual
-     * change). That must neither strand the vehicle nor overcharge it, so the stay is treated
-     * as zero length instead of being rejected.
-     */
-    private static Instant notBefore(Instant earliest, Instant candidate) {
-        return candidate.isBefore(earliest) ? earliest : candidate;
-    }
-
-    private boolean isAlreadyParked(Vehicle vehicle) {
-        return activeSessions.containsKey(vehicle.registrationNumber());
-    }
-
-    private Optional<Space> allocateFreeSpace() {
-        return Optional.ofNullable(availableSpaces.poll());
+        return Optional.of(session.billAt(at, tariff));
     }
 
     private Ticket startSession(Vehicle vehicle, Space space, Instant startTime) {
-        final var registrationNumber = vehicle.registrationNumber();
-        activeSessions.put(registrationNumber, new ParkingSession(vehicle, space, startTime));
-        return new Ticket(space, registrationNumber, startTime);
-    }
-
-    private Bill toBill(Vehicle vehicle, TimeofUsed timeOfUsed) {
-        final var charge = calculateCharge(vehicle, timeOfUsed);
-        return new Bill(
-                vehicle.registrationNumber(),
-                charge.toPounds(),
-                timeOfUsed.start(),
-                timeOfUsed.end()
-        );
-    }
-
-    private Pence calculateCharge(Vehicle vehicle, TimeofUsed timeOfUsed) {
-        final var baseCharge = timeOfUsed.toMinutes() * ratePerMinute(vehicle);
-        final var completedBlocks = timeOfUsed.toDuration().dividedBy(EXTRA_FEE_INTERVAL);
-        final var extraFee = completedBlocks * EXTRA_FEE_IN_PENCE;
-        return new Pence(baseCharge + extraFee);
-    }
-
-    private int ratePerMinute(Vehicle vehicle) {
-        return switch (vehicle.type()) {
-            case SMALL -> 100;
-            case MEDIUM -> 200;
-            case LARGE -> 300;
-        };
+        final var session = new ParkingSession(vehicle, space, startTime);
+        activeSessions.put(session.registrationNumber(), session);
+        return session.ticket();
     }
 }
