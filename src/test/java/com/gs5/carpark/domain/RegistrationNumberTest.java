@@ -19,8 +19,14 @@ class RegistrationNumberTest {
                 .hasMessage("Registration number must not be blank");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"LON 11111", "lon 11111", "  LON 11111  ", "LON    11111", "LON\t11111", "LON\u00A011111"})
+    void shouldNormalizeNumberToCanonicalForm(String number) {
+        assertThat(new RegistrationNumber(number).number()).isEqualTo("LON 11111");
+    }
+
     @Test
-    void shouldKeepNumberAsGiven() {
-        assertThat(new RegistrationNumber("LON 11111").number()).isEqualTo("LON 11111");
+    void shouldTreatDifferentlyWrittenNumbersAsEqual() {
+        assertThat(new RegistrationNumber(" lon  11111")).isEqualTo(new RegistrationNumber("LON 11111"));
     }
 }

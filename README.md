@@ -57,6 +57,8 @@ curl -X POST http://localhost:8080/parking \
 { "vehicleReg": "LON 11111", "timeIn": "2026-11-22T12:00:00Z" }
 ```
 
+The registration number is returned in canonical form: upper case, with surrounding whitespace removed and runs of whitespace collapsed to a single space. `lon  11111` and `LON 11111` are the same vehicle, for check-in and check-out alike.
+
 ### Check out
 
 `POST /parking/bill`
@@ -126,5 +128,7 @@ The domain has no Spring dependencies.
 - **State lives in memory.** It is lost on restart, and the service only works as a single instance.
 - **Thread safety.** All changes to `CarPark` go through one lock, and occupancy is read as a single snapshot, so concurrent requests cannot double-book a space or see an inconsistent count.
 - **Expected outcomes are values, not exceptions.** A full car park or an unknown vehicle comes back as an empty `Optional` and the controller turns it into 409 or 404.
-- **Validation happens twice.** The API rejects bad input with 400 before it reaches the domain. The domain guards its own invariants (non-blank registration, check-out not before check-in); if one of those fails, it is a bug and the service returns 500.
+- **Validation happens twice.** The API rejects bad input with 400 before it reaches the domain. The domain guards its own invariants (non-blank registration, `TimeofUsed` rejects check-out earlier than check-in); if one of those fails, it is a bug and the service returns 500.
+- **Backwards clock.** `CarPark` clamps a check-out time earlier than the check-in to a zero-length stay (charge 0.00, space released) instead of failing with 500.
+- **Injected `Clock`.** The check-in and check-out interactors take a `java.time.Clock` (system UTC in `ApplicationConfig`), so time is deterministic in tests.
 - **409 does not say why** the check-in was refused, because the domain does not yet tell "full" apart from "already parked".
