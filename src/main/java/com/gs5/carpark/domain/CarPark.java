@@ -51,13 +51,22 @@ public final class CarPark {
             if (session == null) {
                 return Optional.empty();
             }
-            timeOfUsed = new TimeofUsed(session.startTime(), at);
+            timeOfUsed = new TimeofUsed(session.startTime(), notBefore(session.startTime(), at));
             activeSessions.remove(registrationNumber);
             availableSpaces.add(session.space());
         } finally {
             lock.unlock();
         }
         return Optional.of(toBill(session.vehicle(), timeOfUsed));
+    }
+
+    /**
+     * The wall clock can step backwards between check-in and check-out (NTP correction, manual
+     * change). That must neither strand the vehicle nor overcharge it, so the stay is treated
+     * as zero length instead of being rejected.
+     */
+    private static Instant notBefore(Instant earliest, Instant candidate) {
+        return candidate.isBefore(earliest) ? earliest : candidate;
     }
 
     private boolean isAlreadyParked(Vehicle vehicle) {

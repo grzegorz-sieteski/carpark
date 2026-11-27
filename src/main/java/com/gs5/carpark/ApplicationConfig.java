@@ -7,9 +7,15 @@ import com.gs5.carpark.domain.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Clock;
+
 @Configuration
 public class ApplicationConfig {
 
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
+    }
 
     @Bean
     public CarPark carPark() {
@@ -22,12 +28,12 @@ public class ApplicationConfig {
     }
 
     @Bean
-    public ParkingCheckInUseCase parkingCheckInUseCase(CarPark carPark) {
-        return new ParkingCheckInInteractor(carPark);
+    public ParkingCheckInUseCase parkingCheckInUseCase(CarPark carPark, Clock clock) {
+        return new ParkingCheckInInteractor(carPark, clock);
     }
 
     @Bean
-    public ParkingCheckOutUseCase parkingCheckOutUseCase(CarPark carPark) {
-        return new CheckOutInteractor(carPark);
+    public ParkingCheckOutUseCase parkingCheckOutUseCase(CarPark carPark, Clock clock) {
+        return new CheckOutInteractor(carPark, clock);
     }
 }
